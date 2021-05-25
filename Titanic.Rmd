@@ -1,0 +1,668 @@
+---
+title: "Titanic"
+author: "Jordan Ziskin"
+date: "5/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(class)
+library(faraway)
+library(fastDummies)
+library(neuralnet)
+library(mice)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Let's start by reading in the data and looking at its dimensions and summary.
+```{r}
+# Read in data
+train <- read.csv("data/train.csv")
+test <- read.csv("data/test.csv")
+
+# View dimensions
+dim(train)
+dim(test)
+
+# View head
+head(train)
+head(test)
+
+# Assign ID to variables and remove from dataset
+id.train <- train$PassengerId
+id.test <- test$PassengerId
+train <- train[,-1]
+test <- test[,-1]
+```
+
+Our training dataset consists of 891 observations, and 12 columns. Of the 12 columns, 1 is the PassengerID, 1 is the response variable "Survived", and the remaining 10 are predictors. The testing dataset has 418 observations with 11 columns. The missing column from the testing dataset is, of course, the response variable "Survived" which we will be predicting here. The ID column was removed from the training and testing datasets and stored as vectors. Before we look at the variables more closely, it is important to notice that we have missing values in the age column labeled as NA, but we also have missing values in other columns, such as the cabin column, that are blank. Let's replace these values with NA so we don't forget to later.
+
+```{r}
+# Replace empty spaces with NA
+train <- as.data.frame(apply(train, 2, function(x) gsub("^$|^ $", NA, x)))
+test <- as.data.frame(apply(test, 2, function(x) gsub("^$|^ $", NA, x)))
+
+# Maintain numeric columns
+for (col in c("Pclass", "Age", "SibSp", "Parch", "Fare")){
+    train[,col] <- as.numeric(train[,col])
+    test[,col] <- as.numeric(test[,col])
+}
+```
+
+Let's look at each column individually and see what we can learn.
+
+```{r}
+# View survival table
+table(train$Survived)
+cat(paste0("Only ", round(table(train$Survived)[2]/sum(table(train$Survived))*100,2), "% of passengers in the training set survived."))
+```
+
+
+
+```{r}
+# View Pclass table
+table(train$Pclass)
+table(test$Pclass)
+```
+
+The number of passengers in Pclass 1 and 2 are approximately the same in both datasets. Additionally, in both datasets the number of passengers in Pclass 3 is double the amount in Pclass 1 or 2.
+
+```{r}
+# View survival plot
+counts <- table(train$Survived, train$Pclass)
+barplot(prop.table(counts,2), main="Survival Rate by Pclass",
+  xlab="PClass", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+ 
+We can clearly see that Pclass is indirectly correlated with survival. For that reason, keeping Pclass as a continuous variable seems best. Next we'll look at Sex.
+ 
+```{r}
+# View Sex table
+table(train$Sex)
+table(test$Sex)
+```
+
+Just as we saw with Pclass, the proportion of males in the training and testing datasets are proportional with the number males being just under double the number of females.
+
+```{r}
+# View survival plot
+counts <- table(train$Survived, train$Sex)
+barplot(prop.table(counts,2), main="Survival Rate by Sex",
+  xlab="Sex", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+As expected, the survival rate of females is significantly larger than the survival rate of males. This suggests that sex is going to be a very strong indicator in determining survival.
+
+```{r}
+# View histogram of ages
+hist(train$Age, main="Age Distribution of Training Data", xlab="Age")
+hist(test$Age, main="Age Distribution of Testing Data", xlab="Age")
+```
+
+We can see the distributions of ages on the titanic are relatively normal with the peak reached at 20 - 30 years old. The distributions between sets is consistent with there being a slightly higher peak in the 20 - 30 year old in the testing set.
+
+```{r}
+# View survival plot
+counts <- table(train$Survived, cut(train$Age, breaks=seq(0,80, by=10)))
+barplot(prop.table(counts,2), main="Survival Rate by Age",
+  xlab="Age", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+Looking at the survival rate by age, we can see that as age increase, the survival rate tends to decrease. While age may not be the strongest indicator, I expect it will still be helpful when combined with the other predictors. Unfortunately, we have a lot of missing values in both the data 
+
+```{r}
+# Print missing values
+cat(paste("There are", sum(is.na(train$Age)), "missing values in the training dataset."), "\n")
+cat(paste("There are", sum(is.na(test$Age)), "missing values in the testing dataset."))
+```
+
+We will use machine learning models to best predict these missing values a little later. Next we'll look at the variables Sibsp and Parch. The distinction between these two categories seem somewhat arbitrary. Why would the numbers of siblings and spouse be together in one category while parents and children be together in another category. It may be helpful to combine these variables into one variable called FamSize for family size. Let's look more closely at this combined family size variable.
+
+```{r}
+# View family size table
+table(train$SibSp+train$Parch)
+table(test$SibSp+test$Parch)
+```
+
+Family size appears to be proportional between training and testing datasets. Most passengers have no family members aboard and very few passengers had 3 or more family members onboard. 
+
+```{r}
+# View survival plot
+counts <- table(train$Survived, train$SibSp+train$Parch)
+barplot(prop.table(counts,2), main="Survival Rate by Family Size",
+  xlab="Family Size", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+There seems to be a somewhat quadratic relationship between survival rate and family size with very large and very small family sizes incurring the greatest number of deaths. For this reason it may be more helpful to make FamSize a categorical variable with 3 categories, "Solo" (FamSize=0), "Nuclear" (FamSize=1-3) and "Large" (FamSize > 3). 
+
+```{r}
+# Add FamSize to training and testing datasets
+train.fs <- train$SibSp + train$Parch
+test.fs <- test$SibSp + test$Parch
+train$FamSize <- ifelse(train.fs == 0, "Solo", ifelse(0 < train.fs & train.fs < 4, "Nuclear", "Large"))
+test$FamSize <- ifelse(test.fs == 0, "Solo", ifelse(0 < test.fs & test.fs < 4, "Nuclear", "Large"))
+
+# Remove SipSp and Parch from training and testing datasets
+train <- train[,-which(names(train) %in% c("SibSp", "Parch"))]
+test <- test[,-which(names(test) %in% c("SibSp", "Parch"))]
+```
+
+Next we'll look at Embarked. 
+
+```{r}
+# View embarked table
+table(train$Embarked)
+table(test$Embarked)
+```
+
+We see that while the distribution is relatively proportional, the training set seems to have a larger proportion of "S"'s than the testing set.
+
+```{r}
+# View survival plot
+counts <- table(train$Survived, train$Embarked)
+barplot(prop.table(counts,2), main="Survival Rate by Embarked Location",
+  xlab="Embarked Location", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+Passengers who embarked from location C seems to have a net positive survival rate, while those who embarked from locations Q and S have a net negative survival rate. Let's look at the Cabin column.
+
+```{r}
+# View unique cabin values
+sort(unique(train$Cabin))
+sort(unique(test$Cabin))
+
+# Print missing values
+cat(paste("There are", sum(is.na(train$Cabin)), "missing values in the training dataset."), "\n")
+cat(paste("There are", sum(is.na(test$Cabin)), "missing values in the testing dataset."))
+```
+
+We notice a few things looking at this data.
+
+1. Most people do not have a cabin listed.
+2. Cabin names are typically a letter A-G, followed by a number
+3. Some entries have more than 1 cabin listed. 
+4. Some entries have a letter listed and then a cabin with another letter like "F G73", "F E57", and "F E69"
+5. In the training dataset we have one cabin listed as "T"
+
+How we deal with these findings is going to take some judgment. Because the vast majority of cabins are missing, we have to concede that it is very unlikely that we will have enough information to predict the cabin of the missing entries. So with that said, we should first consider if there is any difference between the entries for which cabin is named and cabin isn't named. If there is no difference, it may be worth throwing out the column entirely.
+
+```{r}
+counts <- table(train$Survived, is.na(train$Cabin))
+colnames(counts) <- c("Cabin Listed", "Missing Cabin")
+
+barplot(prop.table(counts,2), main="Survival Rate by Cabin Listed",
+        col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+We can see that for the entries for which the cabin is listed, the survival rate was significantly higher. This could be due to survivor bias; those who survived the titanic were able to live to tell their cabin number. Or perhaps there is another reason. Regardless, it seems there is merit to keeping this variable. Let's try to break cabin down even more by using the first letter of the cabin number. Above, we noticed that there were a handful of entries that had the letter F followed by a space and then another non-F cabin like "F G73", "F E57", and "F E69." Below we will list these entries and then we'll remove the F and the space
+
+```{r}
+# Show entries with multiple characters
+train[grepl("[A-Z] +", train$Cabin),]
+test[grepl("[A-Z] +", test$Cabin),]
+
+# Remove first two characters
+remove_first_2_chars <- function(x){
+    sub('..', '', x)
+}
+
+# Remove F and space characters from multi-lettered cabin entries
+train[grepl("[A-Z] +", train$Cabin),
+      which(names(train)=="Cabin")] <- sapply(train[grepl("[A-Z] +", train$Cabin),
+                                                    which(names(train)=="Cabin")], remove_first_2_chars)
+test[grepl("[A-Z] +", test$Cabin),
+     which(names(test)=="Cabin")] <- sapply(test[grepl("[A-Z] +", test$Cabin),
+                                                 which(names(test)=="Cabin")], remove_first_2_chars)
+
+# View same rows
+train[c(76,129,700,716),]
+test[c(58,289,322),]
+```
+
+Additionally, let's replace the cabin marked "T" with NA.
+
+```{r}
+# Show T entry
+train[grepl("T", train$Cabin),]
+
+# Replace with NA
+train[grepl("T", train$Cabin),"Cabin"] <- NA
+
+# View same row
+train[340,]
+```
+
+Now that every cabin entry is either NA or begins with a letter A-G, we will create a new row called CabinLetter which takes the first letter of the cabin. 
+
+```{r}
+# Create CabinLetter column
+train$CabinLetter <- sapply(train$Cabin, substr,1,1)
+test$CabinLetter <- sapply(test$Cabin, substr,1,1)
+
+# View survival plot
+counts <- table(train$Survived, train$CabinLetter)
+barplot(prop.table(counts,2), main="Survival Rate by Cabin Letter",
+  xlab="Cabin Letter", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+
+# Replace NAs with "Unknown"
+train[is.na(train$CabinLetter),"CabinLetter"] <- "Unknown"
+test[is.na(test$CabinLetter),"CabinLetter"] <- "Unknown"
+```
+
+Because only certain cabin letters, B-F, produce a net positive survival rate, it is helpful to have these separate categories as opposed to the previous version of cabin being listed vs. unlisted. In the CabinLetter column, we have replaced all NAs with "Unknown." Before we move on to the next category, we should look for any relationship between cabin number and survival. Perhaps passengers with rooms towards the middle or one particular side of the ship had a lower great of survival than everyone else.
+
+```{r}
+# Create CabinNumber column
+train$CabinNumber <- as.numeric(gsub( " .*$", "", sub( ".","",train$Cabin)))
+
+# View unique cabin numbers
+sort(unique(train$CabinNumber))
+
+# View survival plot
+counts <- table(train$Survived, cut(train$CabinNumber, breaks=seq(0,160, by=20)))
+barplot(prop.table(counts,2), main="Survival Rate by Cabin Number",
+  xlab="Cabin Number", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+There doesn't seem to be any strong relationship between cabin number and survival rate. We'll remove this variable as well as Cabin.
+
+```{r}
+# Remove Cabin and CabinNumber columns
+train <- train[,!names(train) %in% c("Cabin","CabinNumber")]
+test <- test[,!names(test) %in% c("Cabin")]
+```
+
+Let's see if there is any correlation between fare and survival rate.
+
+```{r fig.width=12, fig.height=6}
+# View histogram of fares
+my_par = par(mfrow=c(1,2))
+hist(train$Fare, main="Fare Distribution of Training Data", xlab="Fare")
+hist(train$Fare[train$Fare<100], main="Fare Distribution of Training Data for Fare < 100", xlab="Fare")
+ # View histogram of fares for fares < 100
+hist(test$Fare, main="Fare Distribution of Testing Data", xlab="Fare")
+hist(test$Fare[test$Fare<100], main="Fare Distribution of Testing Data for Fare < 100", xlab="Fare")
+par(my_par)
+```
+
+We can see the distributions of fares are skewed sharply to the right with the vast majority of fares being less than 20 dollars. The distributions between sets is consistent. There also appears to be a few outleir fares in both datasets that are over 500.
+
+```{r fig.width=14, fig.height=7}
+# View survival plot
+counts <- table(train$Survived, cut(train$Fare, breaks=c(seq(0,100, by=10), 200, 300, 600)))
+barplot(prop.table(counts,2), main="Survival Rate by Fare",
+  xlab="Fare", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+```
+
+As expected, we can see a clear relationship between fare and survival rate. Next we'll see if there is anything we can find from the ticket column.
+
+```{r}
+# View unique tickets
+sort(unique(train$Ticket))
+sort(unique(test$Ticket))
+```
+
+We have so many tickets to choose from, it's hard to know how to use this data. My first inclination is to do what we did with Cabin and see if the starting letter has any affect on the survival rate.
+
+```{r}
+# View tables of TicketLetter
+table(train$Survived, sapply(train$Ticket, substr,1,1))
+table(sapply(test$Ticket, substr,1,1))
+
+# Only use categories such than n > 25 for training
+ticket.cats <- c("1","2","3","A","C","P","S")
+train$TicketLetter <- ifelse(sapply(train$Ticket, substr,1,1) %in% ticket.cats, sapply(train$Ticket, substr,1,1), "Other")
+test$TicketLetter <- ifelse(sapply(test$Ticket, substr,1,1) %in% ticket.cats, sapply(test$Ticket, substr,1,1), "Other")
+
+# View Survival Plot
+counts <- table(train$Survived, train$TicketLetter)
+barplot(prop.table(counts,2), main="Survival Rate by Ticket Letter",
+  xlab="Ticket Letter", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+
+# Remove Ticket column
+train <- train[,!names(train) %in% c("Ticket")]
+test <- test[,!names(test) %in% c("Ticket")]
+```
+
+The tickets whose starting letter frequency is less than 25 in the training set were placed together in an "other" group. We then plotted survival rate by ticket letter and found that some letter indicated survival more frequently than others. We must be careful with this category as it could be too strongly correlated with the Pclass or Cabin variables, as they could all be affected by the underlying factor of passenger wealth. We will address this later once we've finished analyzing the remaining predictor, name. While names themselves probably don't tell us too much, the title of the passenger may give us information about their survival rate or perhaps their age.
+
+```{r}
+# Get Titles from the Name Column
+train.title <- sapply(strsplit(sapply(strsplit(train$Name, ","),"[[",2)," "),"[[",2)
+test.title <- sapply(strsplit(sapply(strsplit(test$Name, ","),"[[",2)," "),"[[",2)
+
+# View Counts of each title
+table(train.title)
+table(test.title)
+
+# Only use the titles with n > 25 in training set
+most_common_titles <- c("Master.", "Miss.", "Mr.", "Mrs.")
+train.title <- ifelse(train.title %in% most_common_titles, train.title, "Other")
+test.title <- ifelse(test.title %in% most_common_titles, test.title, "Other")
+
+# Survival Plot
+counts <- table(train$Survived, train.title)
+barplot(prop.table(counts,2), main="Survival Rate by Title",
+  xlab="Title", col=c("red","green"),
+  legend = rownames(counts), beside=TRUE)
+
+# Age by Title Plot
+boxplot(train$Age~train.title, main="Age Distribution by Title (Training Set)",
+  xlab="Title", ylab="Age")
+boxplot(test$Age~test.title, main="Age Distribution by Title (Testing Set)",
+  xlab="Title", ylab="Age")
+
+# Add Title to Dataframes and Remove Name
+train$Title <- train.title
+test$Title <- test.title
+train <- train[,-which(names(train)=="Name")]
+test <- test[,-which(names(test)=="Name")]
+```
+
+The relationship between title and age will likely help us fill in NA values for age. The plot of age by title show that the title of "Master." is given to young men under the age of 16 and "Miss." is given to young women until they marry. The distribution of ages for "Mr." "Mrs." and other titles are much higher. The relationship between survival and title seems to be the same relationship between survival and age. It's likely that using the title column will be too highly correlated to age and won't actually help our model. For this reason, my plan is to use title to help impute the missing values of age. Before we get to imputing missing values, it's important the we first check for collinearity between variables.
+
+```{r}
+# Assign predictors to vectors
+continuous_predictors <- c("Pclass", "Age", "Fare")
+binary_categorical_predictors <- "Sex"
+non_binary_categorical_predictors <- c("Embarked", "FamSize", "CabinLetter", "TicketLetter", "Title")
+categorical_predictors <- c(binary_categorical_predictors, non_binary_categorical_predictors)
+
+# Factorize categorical data
+train[sapply(train, is.character)] <- lapply(train[sapply(train, is.character)], as.factor)
+test[sapply(test, is.character)] <- lapply(test[sapply(test, is.character)], as.factor)
+
+# Check for colinearity between the continuous predictor variables.
+vif(train[,which(names(train) %in% continuous_predictors)])
+
+# Check for correlation of categorical predictor terms
+for (i in 1:(length(categorical_predictors)-1)){
+    for (j in (i+1):length(categorical_predictors)){
+        cat(paste0("Categorical Variables: ", categorical_predictors[i], " and ", categorical_predictors[j]), "\n")
+        tabl <- table(train[,categorical_predictors[i]], train[,categorical_predictors[j]])
+        chsq <- suppressWarnings(chisq.test(table(tabl)))
+        cat(paste("P-value:", chsq$p.value), "\n")
+        cat(paste("Cramer's V:",sqrt(chsq$statistic / (sum(tabl)*(max(dim(tabl))-1)))), "\n\n")
+    }
+}
+```
+
+Of the continuous variables, the VIF values show that while there is a correlation between our continuous predictors, their correlation is relatively low. Similarly, most of our categorical variables are not strongly correlated. The only exception to this is CabinLetter and TicketLetter which have a Cramer's V of 0.2. That said this is somewhat expected as the Cabin Letter and Ticket Letter were likely related. However, because we were missing so many Cabins entries, I think it is okay to include both. Now we're finally ready to start imputing missing values. Let's start by listing all the missing values we have.
+
+```{r}
+for (col in names(train)){
+    if (sum(is.na(train[,col])) > 0){
+        cat(paste("There's", sum(is.na(train[,col])), "missing values in the", col, "column of the training dataset."), "\n")
+    }
+}
+
+for (col in names(test)){
+    if (sum(is.na(test[,col])) > 0){
+        cat(paste("There's", sum(is.na(test[,col])), "missing values in the", col, "column of the testing dataset."), "\n")
+    }
+}
+```
+
+For the Embarked and Fare missing values, we are going to use simple imputation methods as we are only dealing with 3 observations.
+
+```{r}
+# View observations where embarked is missing
+train[is.na(train$Embarked),]
+
+# View table embarked with and without accounting for fare
+table(train$Embarked)
+table(train[train$Fare>70 & train$TicketLetter=="1","Embarked"])
+
+# Replace missing embarked with "S"
+train[is.na(train$Embarked),"Embarked"] <- "S"
+```
+
+
+
+```{r}
+# View observations where fare is missing
+test[is.na(test$Fare),]
+
+# Replace missing fare with median fare for all Embarked=S and TicketLetter=3. 
+(fare.med <- median(test[test$Embarked == "S" & test$TicketLetter=="3","Fare"], na.rm=TRUE))
+test[is.na(test$Fare),"Fare"] <- fare.med
+```
+
+For age, imputation is going to be a lot more challenging. Approximately 20% of the values for age are missing from the training and testing dataset. To simply put the mean or median age value would surely hurt our model. Instead, we are going to predict the age of our missing values using a neural network and MICE with different tuning parameters. We will use cross validation to determine which imputation model is best. Lets start by spliting our datasets into training (where age is known) and NA (where age isn't known) datasets. We will use two new NA sets to allow us to predict the missing age values for the original training and testing datasets.
+
+```{r}
+# New training data. Combination of all entries (training and testing) where age is known. Survived col removed.
+age.train <- rbind(train[!is.na(train$Age),-which(names(train)=="Survived")], test[!is.na(test$Age),])
+
+# Dataframes of original traning and testing in which age is unknown. Survived and Age col removed.
+age.NA.train <- train[is.na(train$Age),-which(names(train) %in% c("Survived", "Age"))]
+age.NA.test <- test[is.na(test$Age),-which(names(train)=="Age")]
+
+# View heads
+head(age.train)
+head(age.NA.train)
+head(age.NA.test)
+
+# View dimensions of training set
+dim(age.train)
+dim(age.NA.train)
+dim(age.NA.test)
+```
+
+Next we're going to view which variables are most closely associated with Age and therefore be a good predictors for the missing age values
+
+```{r}
+# Correlation of continuous predictors
+cor(age.train[!is.na(age.train$Age),which(names(age.train) %in% continuous_predictors)])
+
+# Boxplots of Age vs. Categorical Variables
+my_par = par(mfrow=c(2,3))
+for (col in c(categorical_predictors)){
+    boxplot(age.train$Age~age.train[,which(names(age.train)==col)], main=paste("Age Distribution by",col),
+            xlab=col, ylab="Age")
+}
+```
+
+Of our predictor variables, Age seems most strongly correlated with Title, Pclass, and CabinLetter. The other variables do not appear to provide any insight and therefore may not be helpful in predicting the age. As a result we will leave them out of our imputation models.
+
+
+```{r}
+# Subset Data
+imputation_vars <- c("Age", "Title", "Pclass")
+age.train <- age.train[,which(names(age.train) %in% imputation_vars)]
+age.NA.train <- age.NA.train[,which(names(age.NA.train) %in% imputation_vars)]
+age.NA.test <- age.NA.test[,which(names(age.NA.test) %in% imputation_vars)]
+
+
+# This for loop takes all the categorical predictors and the larges category columns and puts them in a vector
+# The vector extra_cols will be used to remove excess columns created by dummy_cols
+extra_cols <- c("Title")
+for (col in extra_cols){
+    tbl <- table(age.train[,col])
+    largest_cat <- names(tbl)[which(tbl == max(tbl))]
+    extra_col <- paste0(col,"_",largest_cat)
+    extra_cols <- c(extra_cols, extra_col)
+}
+
+# Create dummy cols for age.train for neural network
+age.train <- dummy_cols(age.train)
+age.train <- age.train[,-which(names(age.train) %in% extra_cols)]
+age.NA.train <- dummy_cols(age.NA.train)
+age.NA.train <- age.NA.train[,-which(names(age.NA.train) %in% extra_cols)]
+age.NA.test <- dummy_cols(age.NA.test)
+age.NA.test <- age.NA.test[,-which(names(age.NA.test) %in% extra_cols)]
+```
+
+The following two functions will be used to run 4-fold cross validation of neural network and linear regression on the age.train set with 5 repetitions. A comparison of the test errors will be used to determine which process is best for imputing the data. I will try more methods before deciding which method is best for imputation. 
+
+```{r}
+nnProcedure <- function(df, folds=2, rep=1, threshold=0.01, stepmax=10000, nodes=1, nnrep=1){
+    # Create Result Variable
+    result <- NULL
+  
+    # Loop through rep times
+    for (i in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),]  
+        
+    
+            # Neural Network
+            nnRes <- neuralnet(Age~.,training.data,hidden=nodes,linear.output=TRUE,threshold=threshold,stepmax=stepmax, rep=nnrep)
+            
+            # Loop through all neural networks that converge
+            for (n in 1:length(nnRes$net.result)){
+                if (!is.null(nnRes$net.result[[n]])){
+                    # Train Error 
+                    train_pred <- nnRes$net.result[[n]][,1]
+                    train_actual <- training.data$Age
+                    train_MSE <- sum((train_pred - train_actual)^2)/nrow(training.data)
+                    
+                    # Test Error
+                    test_pred <- predict(nnRes,testing.data)[,1]
+                    test_actual <- testing.data$Age
+                    test_MSE <- sum((test_pred - test_actual)^2)/nrow(testing.data)
+                    
+                    # Create a result vector with variables and errors for plotting
+                    result_vec <- c(nodes, train_MSE, test_MSE)
+                    result <- rbind(result, result_vec)
+                }
+            }
+        }
+    }
+    # Return dataframe of result
+    result <- as.data.frame(result)
+    names(result) <- c("Nodes", "Train MSE", "Test MSE")
+    return (result)
+}
+```
+
+```{r}
+lrProcedure <- function(df, folds=2, rep=1){
+    # Create Result Variable
+    result <- NULL
+  
+    # Loop through rep times
+    for (i in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),] 
+            
+            # Linear Regression
+            reg <- lm(Age~., training.data)
+            
+            # Train Error 
+            train_pred <- reg$fitted.values
+            train_actual <- training.data$Age
+            train_MSE <- sum((train_pred - train_actual)^2)/nrow(training.data)
+                    
+            # Test Error
+            test_pred <- predict(reg,testing.data)
+            test_actual <- testing.data$Age
+            test_MSE <- sum((test_pred - test_actual)^2)/nrow(testing.data)
+                    
+            # Create a result vector with variables and errors for plotting
+            result_vec <- c(train_MSE, test_MSE)
+            result <- rbind(result, result_vec)
+        }
+    }
+    # Return dataframe of result
+    result <- as.data.frame(result)
+    names(result) <- c("Train MSE", "Test MSE")
+    return (result)
+}
+```
+
+```{r}
+# Neural network with 1 hidden layer of 3 nodes
+set.seed(100)
+nn.3 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=3)
+```
+
+```{r}
+# Neural network with 1 hidden layer of 4 nodes
+set.seed(100)
+nn.4 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=4)
+```
+
+
+```{r}
+# Neural network with 1 hidden layer of 5 nodes
+set.seed(100)
+nn.5 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=5) 
+```
+
+
+```{r}
+# Neural network with 1 hidden layer of 6 nodes
+set.seed(100)
+nn.6 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=6) 
+```
+
+
+```{r}
+# Neural network with 2 hidden layers of 3 nodes each
+set.seed(100)
+nn.33 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(3,3)) 
+```
+
+```{r}
+# Neural network with 2 hidden layers of 4 nodes each
+set.seed(100)
+nn.44 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(4,4)) 
+```
+
+```{r}
+# Neural network with 2 hidden layers of 5 nodes each
+set.seed(100)
+nn.55 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(5,5)) 
+```
+
+```{r}
+# Neural network with 2 hidden layers of 6 nodes each
+set.seed(100)
+nn.66 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(6,6)) 
+```
+
+```{r}
+# Linear regression
+set.seed(100)
+lr <- lrProcedure(age.train, folds=4, rep=10)
+```
+
+```{r fig.width=10, fig.height=5}
+# Compare MSE
+boxplot(nn.3[,3], nn.4[,3], nn.5[,3], nn.6[,3],nn.33[,4], nn.44[,4], nn.55[,4], nn.66[,4], lr[,2], names=c("NN3","NN4","NN5","NN6","NN33","NN44","NN55","NN66", "Linear"), main="MSE by method")
+```
+
+# To Do:
+Can you find correlation between continuous and categorical variables?
+What is the best model for imputation of continuous values when you have mixed data?
+Perform Cross Validation to determine best classification model for survival
+Final Prediction
