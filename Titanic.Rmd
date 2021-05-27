@@ -495,6 +495,7 @@ for (col in extra_cols){
 }
 
 # Create dummy cols for age.train for neural network
+age.train.no.dummies <- age.train
 age.train <- dummy_cols(age.train)
 age.train <- age.train[,-which(names(age.train) %in% extra_cols)]
 age.NA.train <- dummy_cols(age.NA.train)
@@ -600,6 +601,192 @@ lrProcedure <- function(df, folds=2, rep=1){
 ```
 
 ```{r}
+MeanMedProcedure <- function(df, folds=2, rep=1){
+    # Create Result Variable
+    result <- NULL
+  
+    # Loop through rep times
+    for (i in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),] 
+            
+            # Train Error 
+            mean_pred <- mean(training.data$Age)
+            median_pred <- median(training.data$Age)
+            train_actual <- training.data$Age
+            mean_train_MSE <- sum((mean_pred - train_actual)^2)/nrow(training.data)
+            median_train_MSE <- sum((median_pred - train_actual)^2)/nrow(training.data)
+                    
+            # Test Error
+            test_actual <- testing.data$Age
+            mean_test_MSE <- sum((mean_pred - test_actual)^2)/nrow(testing.data)
+            median_test_MSE <- sum((median_pred - test_actual)^2)/nrow(testing.data)
+                    
+            # Create a result vector with variables and errors for plotting
+            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, median_test_MSE)
+            result <- rbind(result, result_vec)
+        }
+    }
+    # Return dataframe of result
+    result <- as.data.frame(result)
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    return (result)
+}
+```
+
+```{r}
+MeanMedTitleProcedure <- function(df, folds=2, rep=1){
+    # Create Result Variable
+    result <- NULL
+  
+    # Loop through rep times
+    for (i in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),] 
+            
+            # Get means/medians of each title
+            mean_pred <- numeric()
+            median_pred <- numeric()
+            for (title in sort(unique(training.data$Title))){
+                rows <- training.data[training.data$Title == title, which(names(training.data)=="Age")]
+                mean_pred <- c(mean_pred, mean(rows))
+                median_pred <- c(median_pred, median(rows))
+            }
+            pred_df = data.frame(means = mean_pred, medians = median_pred, row.names = sort(unique(training.data$Title)))
+            
+            # Train Error 
+            mean_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], "means"])
+            median_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], "medians"])
+            train_actual <- training.data$Age
+            mean_train_MSE <- sum((mean_train_pred - train_actual)^2)/nrow(training.data)
+            median_train_MSE <- sum((median_train_pred - train_actual)^2)/nrow(training.data)
+                    
+            # Test Error
+            mean_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], "means"])
+            median_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], "medians"])
+            test_actual <- testing.data$Age
+            mean_test_MSE <- sum((mean_test_pred - test_actual)^2)/nrow(testing.data)
+            median_test_MSE <- sum((median_test_pred - test_actual)^2)/nrow(testing.data)
+                    
+            # Create a result vector with variables and errors for plotting
+            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, median_test_MSE)
+            result <- rbind(result, result_vec)
+        }
+    }
+    # Return dataframe of result
+    result <- as.data.frame(result)
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    return (result)
+}
+```
+
+```{r}
+MeanMedTitleClassProcedure <- function(df, folds=2, rep=1){
+    # Create Result Variable
+    result <- NULL
+  
+    # Loop through rep times
+    for (i in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),] 
+            
+            # Get means/medians of each title
+            titles <- character()
+            pclasses <- numeric()
+            mean_pred <- numeric()
+            median_pred <- numeric()
+            for (title in sort(unique(training.data$Title))){
+              for (pclass in sort(unique(training.data$Pclass))){
+                rows <- training.data[training.data$Title==title & training.data$Pclass==pclass, which(names(training.data)=="Age")]
+                titles <- c(titles, title)
+                pclasses <- c(pclasses, pclass)
+                mean_pred <- c(mean_pred, mean(rows))
+                median_pred <- c(median_pred, median(rows))
+              }
+            }
+            mean_pred_matrix = matrix(mean_pred, nrow=length(unique(training.data$Pclass)), 
+                                      dimnames=list(sort(unique(training.data$Pclass)), sort(unique(training.data$Title))))
+            median_pred_matrix = matrix(median_pred, nrow=length(unique(training.data$Pclass)), 
+                                      dimnames=list(sort(unique(training.data$Pclass)), sort(unique(training.data$Title))))
+            
+            # Train Error 
+            mean_train_pred <- apply(training.data, 1, function (x) mean_pred_matrix[x["Pclass"], x["Title"]])
+            median_train_pred <- apply(training.data, 1, function (x) median_pred_matrix[x["Pclass"], x["Title"]])
+            train_actual <- training.data$Age
+            mean_train_MSE <- sum((mean_train_pred - train_actual)^2)/nrow(training.data)
+            median_train_MSE <- sum((median_train_pred - train_actual)^2)/nrow(training.data)
+                    
+            # Test Error
+            mean_test_pred <- apply(testing.data, 1, function (x) mean_pred_matrix[x["Pclass"], x["Title"]])
+            median_test_pred <- apply(testing.data, 1, function (x) median_pred_matrix[x["Pclass"], x["Title"]])
+            test_actual <- testing.data$Age
+            mean_test_MSE <- sum((mean_test_pred - test_actual)^2)/nrow(testing.data)
+            median_test_MSE <- sum((median_test_pred - test_actual)^2)/nrow(testing.data)
+                    
+            # Create a result vector with variables and errors for plotting
+            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, median_test_MSE)
+            result <- rbind(result, result_vec)
+        }
+    }
+    # Return dataframe of result
+    result <- as.data.frame(result)
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    return (result)
+}
+```
+
+```{r}
+# Mean/Median
+set.seed(100)
+mm <- MeanMedProcedure(age.train.no.dummies, folds=4, rep=5)
+```
+
+```{r}
+# Mean/Median by Title
+set.seed(100)
+mmByTitle <- MeanMedTitleProcedure(age.train.no.dummies, folds=4, rep=5)
+```
+
+```{r}
+# Mean/Median by Title and Pclass
+set.seed(100)
+mmByTitleClass <- MeanMedTitleClassProcedure(age.train.no.dummies, folds=4, rep=5)
+```
+
+```{r}
+# Linear regression
+set.seed(100)
+lr <- lrProcedure(age.train, folds=4, rep=5)
+```
+
+```{r}
 # Neural network with 1 hidden layer of 3 nodes
 set.seed(100)
 nn.3 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=3)
@@ -611,20 +798,17 @@ set.seed(100)
 nn.4 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=4)
 ```
 
-
 ```{r}
 # Neural network with 1 hidden layer of 5 nodes
 set.seed(100)
 nn.5 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=5) 
 ```
 
-
 ```{r}
 # Neural network with 1 hidden layer of 6 nodes
 set.seed(100)
 nn.6 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=6) 
 ```
-
 
 ```{r}
 # Neural network with 2 hidden layers of 3 nodes each
@@ -650,15 +834,13 @@ set.seed(100)
 nn.66 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(6,6)) 
 ```
 
-```{r}
-# Linear regression
-set.seed(100)
-lr <- lrProcedure(age.train, folds=4, rep=10)
-```
-
-```{r fig.width=10, fig.height=5}
+```{r fig.width=12, fig.height=5}
 # Compare MSE
-boxplot(nn.3[,3], nn.4[,3], nn.5[,3], nn.6[,3],nn.33[,4], nn.44[,4], nn.55[,4], nn.66[,4], lr[,2], names=c("NN3","NN4","NN5","NN6","NN33","NN44","NN55","NN66", "Linear"), main="MSE by method")
+boxplot(mm[,2], mm[,4], mmByTitle[,2], mmByTitle[,4], mmByTitleClass[,2], mmByTitleClass[,4], 
+        lr[,2], nn.3[,3], nn.4[,3], nn.5[,3], nn.6[,3],nn.33[,4], nn.44[,4], nn.55[,4], nn.66[,4], 
+        names=c("Mean","Median", "Mean by Title", "Median by Title", "Mean by Title and Class", 
+                "Median by Title and Class", "Linear", "NN3","NN4","NN5","NN6","NN33","NN44","NN55","NN66"), 
+        main="MSE by method")
 ```
 
 # To Do:
