@@ -2,15 +2,19 @@
 title: "Titanic"
 author: "Jordan Ziskin"
 date: "5/20/2021"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
 library(class)
 library(faraway)
 library(fastDummies)
+library(MASS)
 library(neuralnet)
-library(mice)
+library(e1071)
+library(randomForest)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -54,7 +58,8 @@ Let's look at each column individually and see what we can learn.
 ```{r}
 # View survival table
 table(train$Survived)
-cat(paste0("Only ", round(table(train$Survived)[2]/sum(table(train$Survived))*100,2), "% of passengers in the training set survived."))
+cat(paste0("Only ", round(table(train$Survived)[2]/sum(table(train$Survived))*100,2), 
+           "% of passengers in the training set survived."))
 ```
 
 
@@ -115,7 +120,8 @@ Looking at the survival rate by age, we can see that as age increase, the surviv
 
 ```{r}
 # Print missing values
-cat(paste("There are", sum(is.na(train$Age)), "missing values in the training dataset."), "\n")
+cat(paste("There are", sum(is.na(train$Age)), 
+          "missing values in the training dataset."), "\n")
 cat(paste("There are", sum(is.na(test$Age)), "missing values in the testing dataset."))
 ```
 
@@ -143,8 +149,10 @@ There seems to be a somewhat quadratic relationship between survival rate and fa
 # Add FamSize to training and testing datasets
 train.fs <- train$SibSp + train$Parch
 test.fs <- test$SibSp + test$Parch
-train$FamSize <- ifelse(train.fs == 0, "Solo", ifelse(0 < train.fs & train.fs < 4, "Nuclear", "Large"))
-test$FamSize <- ifelse(test.fs == 0, "Solo", ifelse(0 < test.fs & test.fs < 4, "Nuclear", "Large"))
+train$FamSize <- ifelse(train.fs == 0, "Solo", ifelse(0 < train.fs & train.fs < 4, 
+                                                      "Nuclear", "Large"))
+test$FamSize <- ifelse(test.fs == 0, "Solo", ifelse(0 < test.fs & test.fs < 4, 
+                                                    "Nuclear", "Large"))
 
 # Remove SipSp and Parch from training and testing datasets
 train <- train[,-which(names(train) %in% c("SibSp", "Parch"))]
@@ -177,8 +185,10 @@ sort(unique(train$Cabin))
 sort(unique(test$Cabin))
 
 # Print missing values
-cat(paste("There are", sum(is.na(train$Cabin)), "missing values in the training dataset."), "\n")
-cat(paste("There are", sum(is.na(test$Cabin)), "missing values in the testing dataset."))
+cat(paste("There are", sum(is.na(train$Cabin)), 
+          "missing values in the training dataset."), "\n")
+cat(paste("There are", sum(is.na(test$Cabin)), 
+          "missing values in the testing dataset."))
 ```
 
 We notice a few things looking at this data.
@@ -215,10 +225,12 @@ remove_first_2_chars <- function(x){
 # Remove F and space characters from multi-lettered cabin entries
 train[grepl("[A-Z] +", train$Cabin),
       which(names(train)=="Cabin")] <- sapply(train[grepl("[A-Z] +", train$Cabin),
-                                                    which(names(train)=="Cabin")], remove_first_2_chars)
+                                                    which(names(train)=="Cabin")], 
+                                              remove_first_2_chars)
 test[grepl("[A-Z] +", test$Cabin),
      which(names(test)=="Cabin")] <- sapply(test[grepl("[A-Z] +", test$Cabin),
-                                                 which(names(test)=="Cabin")], remove_first_2_chars)
+                                                 which(names(test)=="Cabin")], 
+                                            remove_first_2_chars)
 
 # View same rows
 train[c(76,129,700,716),]
@@ -286,10 +298,12 @@ Let's see if there is any correlation between fare and survival rate.
 # View histogram of fares
 my_par = par(mfrow=c(1,2))
 hist(train$Fare, main="Fare Distribution of Training Data", xlab="Fare")
-hist(train$Fare[train$Fare<100], main="Fare Distribution of Training Data for Fare < 100", xlab="Fare")
+hist(train$Fare[train$Fare<100], main="Fare Distribution of Training Data for Fare < 100", 
+     xlab="Fare")
  # View histogram of fares for fares < 100
 hist(test$Fare, main="Fare Distribution of Testing Data", xlab="Fare")
-hist(test$Fare[test$Fare<100], main="Fare Distribution of Testing Data for Fare < 100", xlab="Fare")
+hist(test$Fare[test$Fare<100], main="Fare Distribution of Testing Data for Fare < 100", 
+     xlab="Fare")
 par(my_par)
 ```
 
@@ -320,8 +334,10 @@ table(sapply(test$Ticket, substr,1,1))
 
 # Only use categories such than n > 25 for training
 ticket.cats <- c("1","2","3","A","C","P","S")
-train$TicketLetter <- ifelse(sapply(train$Ticket, substr,1,1) %in% ticket.cats, sapply(train$Ticket, substr,1,1), "Other")
-test$TicketLetter <- ifelse(sapply(test$Ticket, substr,1,1) %in% ticket.cats, sapply(test$Ticket, substr,1,1), "Other")
+train$TicketLetter <- ifelse(sapply(train$Ticket, substr,1,1) %in% ticket.cats, 
+                             sapply(train$Ticket, substr,1,1), "Other")
+test$TicketLetter <- ifelse(sapply(test$Ticket, substr,1,1) %in% ticket.cats, 
+                            sapply(test$Ticket, substr,1,1), "Other")
 
 # View Survival Plot
 counts <- table(train$Survived, train$TicketLetter)
@@ -375,12 +391,16 @@ The relationship between title and age will likely help us fill in NA values for
 # Assign predictors to vectors
 continuous_predictors <- c("Pclass", "Age", "Fare")
 binary_categorical_predictors <- "Sex"
-non_binary_categorical_predictors <- c("Embarked", "FamSize", "CabinLetter", "TicketLetter", "Title")
-categorical_predictors <- c(binary_categorical_predictors, non_binary_categorical_predictors)
+non_binary_categorical_predictors <- c("Embarked", "FamSize", "CabinLetter", 
+                                       "TicketLetter", "Title")
+categorical_predictors <- c(binary_categorical_predictors, 
+                            non_binary_categorical_predictors)
 
 # Factorize categorical data
-train[sapply(train, is.character)] <- lapply(train[sapply(train, is.character)], as.factor)
-test[sapply(test, is.character)] <- lapply(test[sapply(test, is.character)], as.factor)
+train[sapply(train, is.character)] <- lapply(train[sapply(train, is.character)], 
+                                             as.factor)
+test[sapply(test, is.character)] <- lapply(test[sapply(test, is.character)], 
+                                           as.factor)
 
 # Check for colinearity between the continuous predictor variables.
 vif(train[,which(names(train) %in% continuous_predictors)])
@@ -388,11 +408,14 @@ vif(train[,which(names(train) %in% continuous_predictors)])
 # Check for correlation of categorical predictor terms
 for (i in 1:(length(categorical_predictors)-1)){
     for (j in (i+1):length(categorical_predictors)){
-        cat(paste0("Categorical Variables: ", categorical_predictors[i], " and ", categorical_predictors[j]), "\n")
-        tabl <- table(train[,categorical_predictors[i]], train[,categorical_predictors[j]])
+        cat(paste0("Categorical Variables: ", categorical_predictors[i], " and ", 
+                   categorical_predictors[j]), "\n")
+        tabl <- table(train[,categorical_predictors[i]], 
+                      train[,categorical_predictors[j]])
         chsq <- suppressWarnings(chisq.test(table(tabl)))
         cat(paste("P-value:", chsq$p.value), "\n")
-        cat(paste("Cramer's V:",sqrt(chsq$statistic / (sum(tabl)*(max(dim(tabl))-1)))), "\n\n")
+        cat(paste("Cramer's V:",
+                  sqrt(chsq$statistic / (sum(tabl)*(max(dim(tabl))-1)))), "\n\n")
     }
 }
 ```
@@ -402,13 +425,15 @@ Of the continuous variables, the VIF values show that while there is a correlati
 ```{r}
 for (col in names(train)){
     if (sum(is.na(train[,col])) > 0){
-        cat(paste("There's", sum(is.na(train[,col])), "missing values in the", col, "column of the training dataset."), "\n")
+        cat(paste("There's", sum(is.na(train[,col])), "missing values in the", col, 
+                  "column of the training dataset."), "\n")
     }
 }
 
 for (col in names(test)){
     if (sum(is.na(test[,col])) > 0){
-        cat(paste("There's", sum(is.na(test[,col])), "missing values in the", col, "column of the testing dataset."), "\n")
+        cat(paste("There's", sum(is.na(test[,col])), "missing values in the", col, 
+                  "column of the testing dataset."), "\n")
     }
 }
 ```
@@ -434,7 +459,8 @@ train[is.na(train$Embarked),"Embarked"] <- "S"
 test[is.na(test$Fare),]
 
 # Replace missing fare with median fare for all Embarked=S and TicketLetter=3. 
-(fare.med <- median(test[test$Embarked == "S" & test$TicketLetter=="3","Fare"], na.rm=TRUE))
+(fare.med <- median(test[test$Embarked == "S" & test$TicketLetter=="3","Fare"], 
+                    na.rm=TRUE))
 test[is.na(test$Fare),"Fare"] <- fare.med
 ```
 
@@ -442,7 +468,8 @@ For age, imputation is going to be a lot more challenging. Approximately 20% of 
 
 ```{r}
 # New training data. Combination of all entries (training and testing) where age is known. Survived col removed.
-age.train <- rbind(train[!is.na(train$Age),-which(names(train)=="Survived")], test[!is.na(test$Age),])
+age.train <- rbind(train[!is.na(train$Age),-which(names(train)=="Survived")], 
+                   test[!is.na(test$Age),])
 
 # Dataframes of original traning and testing in which age is unknown. Survived and Age col removed.
 age.NA.train <- train[is.na(train$Age),-which(names(train) %in% c("Survived", "Age"))]
@@ -468,7 +495,8 @@ cor(age.train[!is.na(age.train$Age),which(names(age.train) %in% continuous_predi
 # Boxplots of Age vs. Categorical Variables
 my_par = par(mfrow=c(2,3))
 for (col in c(categorical_predictors)){
-    boxplot(age.train$Age~age.train[,which(names(age.train)==col)], main=paste("Age Distribution by",col),
+    boxplot(age.train$Age~age.train[,which(names(age.train)==col)], 
+            main=paste("Age Distribution by",col),
             xlab=col, ylab="Age")
 }
 ```
@@ -494,8 +522,10 @@ for (col in extra_cols){
     extra_cols <- c(extra_cols, extra_col)
 }
 
-# Create dummy cols for age.train for neural network
+# Store age subsets for later
 age.train.no.dummies <- age.train
+
+# Create dummy cols for age.train for neural network
 age.train <- dummy_cols(age.train)
 age.train <- age.train[,-which(names(age.train) %in% extra_cols)]
 age.NA.train <- dummy_cols(age.NA.train)
@@ -504,10 +534,11 @@ age.NA.test <- dummy_cols(age.NA.test)
 age.NA.test <- age.NA.test[,-which(names(age.NA.test) %in% extra_cols)]
 ```
 
-The following two functions will be used to run 4-fold cross validation of neural network and linear regression on the age.train set with 5 repetitions. A comparison of the test errors will be used to determine which process is best for imputing the data. I will try more methods before deciding which method is best for imputation. 
+The following two functions will be used to run 4-fold cross validation on the age.train set with 5 repetitions to find the best imputation method. A comparison of the test errors will be used to determine which process is best for imputing the data.
 
 ```{r}
-nnProcedure <- function(df, folds=2, rep=1, threshold=0.01, stepmax=10000, nodes=1, nnrep=1){
+nnProcedure <- function(df, folds=2, rep=1, threshold=0.01, stepmax=10000, nodes=1, 
+                        nnrep=1){
     # Create Result Variable
     result <- NULL
   
@@ -527,7 +558,8 @@ nnProcedure <- function(df, folds=2, rep=1, threshold=0.01, stepmax=10000, nodes
         
     
             # Neural Network
-            nnRes <- neuralnet(Age~.,training.data,hidden=nodes,linear.output=TRUE,threshold=threshold,stepmax=stepmax, rep=nnrep)
+            nnRes <- neuralnet(Age~.,training.data,hidden=nodes,linear.output=TRUE,
+                               threshold=threshold,stepmax=stepmax, rep=nnrep)
             
             # Loop through all neural networks that converge
             for (n in 1:length(nnRes$net.result)){
@@ -632,13 +664,15 @@ MeanMedProcedure <- function(df, folds=2, rep=1){
             median_test_MSE <- sum((median_pred - test_actual)^2)/nrow(testing.data)
                     
             # Create a result vector with variables and errors for plotting
-            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, median_test_MSE)
+            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, 
+                            median_test_MSE)
             result <- rbind(result, result_vec)
         }
     }
     # Return dataframe of result
     result <- as.data.frame(result)
-    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", 
+                       "Median Test MSE")
     return (result)
 }
 ```
@@ -666,34 +700,41 @@ MeanMedTitleProcedure <- function(df, folds=2, rep=1){
             mean_pred <- numeric()
             median_pred <- numeric()
             for (title in sort(unique(training.data$Title))){
-                rows <- training.data[training.data$Title == title, which(names(training.data)=="Age")]
+                rows <- training.data[training.data$Title == title, 
+                                      which(names(training.data)=="Age")]
                 mean_pred <- c(mean_pred, mean(rows))
                 median_pred <- c(median_pred, median(rows))
             }
             pred_df = data.frame(means = mean_pred, medians = median_pred, row.names = sort(unique(training.data$Title)))
             
             # Train Error 
-            mean_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], "means"])
-            median_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], "medians"])
+            mean_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], 
+                                                                            "means"])
+            median_train_pred <- apply(training.data, 1, function (x) pred_df[x["Title"], 
+                                                                              "medians"])
             train_actual <- training.data$Age
             mean_train_MSE <- sum((mean_train_pred - train_actual)^2)/nrow(training.data)
             median_train_MSE <- sum((median_train_pred - train_actual)^2)/nrow(training.data)
                     
             # Test Error
-            mean_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], "means"])
-            median_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], "medians"])
+            mean_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], 
+                                                                          "means"])
+            median_test_pred <- apply(testing.data, 1, function (x) pred_df[x["Title"], 
+                                                                            "medians"])
             test_actual <- testing.data$Age
             mean_test_MSE <- sum((mean_test_pred - test_actual)^2)/nrow(testing.data)
             median_test_MSE <- sum((median_test_pred - test_actual)^2)/nrow(testing.data)
                     
             # Create a result vector with variables and errors for plotting
-            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, median_test_MSE)
+            result_vec <- c(mean_train_MSE, mean_test_MSE, median_train_MSE, 
+                            median_test_MSE)
             result <- rbind(result, result_vec)
         }
     }
     # Return dataframe of result
     result <- as.data.frame(result)
-    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", 
+                       "Median Test MSE")
     return (result)
 }
 ```
@@ -724,7 +765,8 @@ MeanMedTitleClassProcedure <- function(df, folds=2, rep=1){
             median_pred <- numeric()
             for (title in sort(unique(training.data$Title))){
               for (pclass in sort(unique(training.data$Pclass))){
-                rows <- training.data[training.data$Title==title & training.data$Pclass==pclass, which(names(training.data)=="Age")]
+                rows <- training.data[training.data$Title==title & training.data$Pclass==pclass, 
+                                      which(names(training.data)=="Age")]
                 titles <- c(titles, title)
                 pclasses <- c(pclasses, pclass)
                 mean_pred <- c(mean_pred, mean(rows))
@@ -732,20 +774,31 @@ MeanMedTitleClassProcedure <- function(df, folds=2, rep=1){
               }
             }
             mean_pred_matrix = matrix(mean_pred, nrow=length(unique(training.data$Pclass)), 
-                                      dimnames=list(sort(unique(training.data$Pclass)), sort(unique(training.data$Title))))
-            median_pred_matrix = matrix(median_pred, nrow=length(unique(training.data$Pclass)), 
-                                      dimnames=list(sort(unique(training.data$Pclass)), sort(unique(training.data$Title))))
+                                      dimnames=list(sort(unique(training.data$Pclass)), 
+                                                    sort(unique(training.data$Title))))
+            median_pred_matrix = matrix(median_pred, 
+                                        nrow=length(unique(training.data$Pclass)), 
+                                        dimnames=list(sort(unique(training.data$Pclass)), 
+                                                    sort(unique(training.data$Title))))
             
             # Train Error 
-            mean_train_pred <- apply(training.data, 1, function (x) mean_pred_matrix[x["Pclass"], x["Title"]])
-            median_train_pred <- apply(training.data, 1, function (x) median_pred_matrix[x["Pclass"], x["Title"]])
+            mean_train_pred <- apply(training.data, 1, 
+                                     function (x) mean_pred_matrix[x["Pclass"], 
+                                                                   x["Title"]])
+            median_train_pred <- apply(training.data, 1, 
+                                       function (x) median_pred_matrix[x["Pclass"], 
+                                                                       x["Title"]])
             train_actual <- training.data$Age
             mean_train_MSE <- sum((mean_train_pred - train_actual)^2)/nrow(training.data)
             median_train_MSE <- sum((median_train_pred - train_actual)^2)/nrow(training.data)
                     
             # Test Error
-            mean_test_pred <- apply(testing.data, 1, function (x) mean_pred_matrix[x["Pclass"], x["Title"]])
-            median_test_pred <- apply(testing.data, 1, function (x) median_pred_matrix[x["Pclass"], x["Title"]])
+            mean_test_pred <- apply(testing.data, 1, 
+                                    function (x) mean_pred_matrix[x["Pclass"], 
+                                                                  x["Title"]])
+            median_test_pred <- apply(testing.data, 1, 
+                                      function (x) median_pred_matrix[x["Pclass"], 
+                                                                      x["Title"]])
             test_actual <- testing.data$Age
             mean_test_MSE <- sum((mean_test_pred - test_actual)^2)/nrow(testing.data)
             median_test_MSE <- sum((median_test_pred - test_actual)^2)/nrow(testing.data)
@@ -757,7 +810,8 @@ MeanMedTitleClassProcedure <- function(df, folds=2, rep=1){
     }
     # Return dataframe of result
     result <- as.data.frame(result)
-    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", "Median Test MSE")
+    names(result) <- c("Mean Train MSE", "Mean Test MSE", "Median Train MSE", 
+                       "Median Test MSE")
     return (result)
 }
 ```
@@ -813,25 +867,29 @@ nn.6 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, n
 ```{r}
 # Neural network with 2 hidden layers of 3 nodes each
 set.seed(100)
-nn.33 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(3,3)) 
+nn.33 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, 
+                     nodes=c(3,3)) 
 ```
 
 ```{r}
 # Neural network with 2 hidden layers of 4 nodes each
 set.seed(100)
-nn.44 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(4,4)) 
+nn.44 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, 
+                     nodes=c(4,4)) 
 ```
 
 ```{r}
 # Neural network with 2 hidden layers of 5 nodes each
 set.seed(100)
-nn.55 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(5,5)) 
+nn.55 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, 
+                     nodes=c(5,5)) 
 ```
 
 ```{r}
 # Neural network with 2 hidden layers of 6 nodes each
 set.seed(100)
-nn.66 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, nodes=c(6,6)) 
+nn.66 <- nnProcedure(age.train, folds=4, rep=5, threshold=0.03, stepmax=150000, 
+                     nodes=c(6,6)) 
 ```
 
 ```{r fig.width=12, fig.height=5}
@@ -843,8 +901,199 @@ boxplot(mm[,2], mm[,4], mmByTitle[,2], mmByTitle[,4], mmByTitleClass[,2], mmByTi
         main="MSE by method")
 ```
 
-# To Do:
-Can you find correlation between continuous and categorical variables?
-What is the best model for imputation of continuous values when you have mixed data?
-Perform Cross Validation to determine best classification model for survival
-Final Prediction
+Above I used 4 procedures for imputation. First, I replaced the missing values with the mean and then the median age of all passengers. Then, I replaced the age using the mean and then the median age of each title. Then I tried the same procedure, but I used both title and pclass. Next I tried linear regression. And lastly, I tried training a neural network. The neural networks, linear regression, and mean and median by class and title all produced test errors in the same range. Based on these results, I'm going to go with mean by pclass and title.
+
+```{r}
+# Create matrix of mean age by title and pclass
+titles <- character()
+pclasses <- numeric()
+mean_pred <- numeric()
+
+for (title in sort(unique(age.train.no.dummies$Title))){
+  for (pclass in sort(unique(age.train.no.dummies$Pclass))){
+    rows <- age.train.no.dummies[age.train.no.dummies$Title==title & age.train.no.dummies$Pclass==pclass, 
+                      which(names(age.train.no.dummies)=="Age")]
+    titles <- c(titles, title)
+    pclasses <- c(pclasses, pclass)
+    mean_pred <- c(mean_pred, mean(rows))
+    }
+}
+mean_pred_matrix = matrix(mean_pred, nrow=length(unique(age.train.no.dummies$Pclass)), 
+                          dimnames=list(sort(unique(age.train.no.dummies$Pclass)), 
+                                        sort(unique(age.train.no.dummies$Title))))
+
+# Impute missing data
+train[is.na(train$Age), which(names(train)=="Age")] <- apply(train[is.na(train$Age),], 
+                                                             1, function (x) mean_pred_matrix[x["Pclass"], 
+                                                                                              x["Title"]])
+test[is.na(test$Age), which(names(test)=="Age")] <- apply(test[is.na(test$Age),], 
+                                                          1, function (x) mean_pred_matrix[x["Pclass"], 
+                                                                                           x["Title"]])
+
+# Show missing data is filled
+paste("There are", sum(is.na(train$Age)), 
+      "missing values in the age column of the training set")
+paste("There are", sum(is.na(test$Age)), 
+      "missing values in the age column of the testing set")
+```
+
+Unfortunately there is still one missing value left in the testing set. This is because there are no available ages for passengers of pclass 3 and title "Other". We will replace this one missing value with the mean age of all female and "Other" titled passengers.
+
+```{r}
+# View entry with missing data
+train[train$Pclass==3 & train$Title=="Other",]
+test[test$Pclass==3 & test$Title=="Other",]
+
+# Replace missing value with mean age of all female and "Other" titled passengers
+full_data <- rbind(train[,-which(names(train)=="Survived")],test)
+test[test$Pclass==3 & test$Title=="Other", "Age"] <- mean(full_data[full_data$Sex=="female" & full_data$Title=="Other","Age"], 
+                                                          na.rm = TRUE)
+
+# Show missing data is filled
+paste("There are", sum(sapply(test, is.na)), "missing values in the training set")
+paste("There are", sum(sapply(train, is.na)), "missing values in the testing set")
+```
+
+Before we begin our classification methods, we're going to write some functions to assist with our analysis. The assess.prediction function does exactly what the name suggests, it helps up assess the accuracy of our predictions made by a classification method. The function takes the true values and the predicted values and prints out the sensitivity, specificity, precision, false discovery, false positive rate, and a confusion matrix. The assess.crossval.prediction function is similar to the assess prediction function, except it will be used to record all of the previously listed results while performing cross validation in the crossValClassifier function. Lastly, the crossValClassifier function performs cross validation for a given method, kfolds, and repetitions. It returns a matrix of model stats calculated by the access.crossval.prediction function which can be used for plotting. The number of rows in the matrix will equal the number of folds times the number of repetitions. This function works for the following classifying methods: logistic regression, LDA, QDA, KNN, Naive Bayes, and Random Forest.
+
+```{r}
+assess.crossval.prediction <- function(truth,predicted, Tval=1, Fval=0) {
+    # Calculate Stats
+    Accuracy <- signif(sum(truth==predicted)*100/ length(truth),3)
+    Error <- signif(sum(truth!=predicted)*100/ length(truth),3)
+    TP <- sum(truth==Tval & predicted==Tval) 
+    TN <- sum(truth==Fval & predicted==Fval) 
+    FP <- sum(truth==Fval & predicted==Tval) 
+    FN <- sum(truth==Tval & predicted==Fval) 
+    P <- TP+FN # total number of positives in the truth data 
+    N <- FP+TN # total number of negatives
+    sens <- signif(100*TP/P,3)
+    spec <- signif(100*TN/N,3)
+    PPV <- signif(100*TP/(TP+FP),3)
+    FDR <- 1-PPV
+
+    # Create Result Vector
+    result <- c(Accuracy, Error, TP, TN, FP, FN, sens, spec, PPV, FDR)
+    names(result) <- c("Accuracy", "Error", "TP", "TN", "FP", "FN", "Sensitivity", 
+                       "Specificity", "PPV", "FDR")
+    return(result)
+}
+
+# Function returns matrix of classifying stats fold * rep times
+crossValClassifier <- function(df, folds, method, rep=1, k=1, Tval=1, Fval=0, 
+                               response="Y", thres=0.5){
+    # df is a dataframe (with response variable as response)
+    # folds is the number of folds to perform cross validation on
+    # method is the classifying method
+    # rep is the number of repetitions
+    # k is used for KNN classifier
+
+    # Create Result Variable
+    result <- NULL
+    
+    # Loop through repetitions
+    for (r in 1:rep){
+    
+        # Shuffle df
+        df <- df[sample(nrow(df)),]
+  
+        # Split data into folds
+        fold_n <- nrow(df)/folds
+        for (i in 1:folds){
+            lower_bound <- floor(fold_n*(i-1)+1)
+            upper_bound <- floor(fold_n*(i))
+            testing.data <- df[lower_bound:upper_bound,]
+            training.data <- df[-(lower_bound:upper_bound),]
+    
+            # Run classifying method
+            # Logistic Regression
+            if (method == "Logistic"){
+                glm.fit <- glm(as.formula(paste0(response,"~.")),data=training.data,family=binomial) 
+                glm.probabilities <- predict(glm.fit,newdata=testing.data[,-which(names(testing.data)==response)], type="response")
+                predictions <- as.factor(ifelse(glm.probabilities > thres, Tval, Fval))
+                result <- rbind(result, assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], predictions))
+            }
+
+            # LDA
+            if (method == "LDA"){
+                lda.fit <- lda(as.formula(paste0(response,"~.")),data=training.data)
+                lda.probabilities <- predict(lda.fit,newdata=testing.data[,-which(names(testing.data)==response)])$posterior[,2]
+                predictions <- as.factor(ifelse(lda.probabilities > thres, Tval, Fval))
+                result <- rbind(result, assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], predictions))
+            }
+
+            # QDA
+            if (method == "QDA"){
+                qda.fit <- qda(as.formula(paste0(response,"~.")),data=training.data)
+                qda.probabilities <- predict(qda.fit,newdata=testing.data[,-which(names(df)==response)])$posterior[,2]
+                predictions <- as.factor(ifelse(qda.probabilities > thres, Tval, Fval))
+                result <- rbind(result, assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], predictions))
+            }
+
+            # KNN
+            if (method == "KNN"){
+                predictions <- knn(train=training.data[,-which(names(training.data)==response)], 
+                                   test=testing.data[,-which(names(testing.data)==response)], 
+                                   cl=training.data[,which(names(training.data)==response)], k=k)
+                result <- rbind(result, assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], 
+                                                                   predictions, Tval=Tval, Fval=Fval))
+            }
+    
+            # Naive Bayes
+            if (method == "Naive"){
+                nb.fit <- naiveBayes(as.formula(paste0(response,"~.")),data=training.data) 
+                predictions <- predict(nb.fit,newdata=testing.data[,-which(names(df)==response)],type="class")
+                result <- rbind(result, assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], 
+                                                                   predictions, Tval=Tval, Fval=Fval))
+            }
+            
+            # Random Forest
+            if (method == "Random Forest"){
+                rf.fit <- randomForest(training.data[,-which(names(training.data)==response)], training.data[,which(names(training.data)==response)])
+                predictions <- predict(rf.fit,newdata=testing.data[,-which(names(testing.data)==response)])
+                result <- rbind(result, c(assess.crossval.prediction(testing.data[,which(names(testing.data)==response)], predictions), "OOB Error"=100*mean(rf.fit$err.rate[,1])))
+            }
+        }
+    }
+
+    return(result)
+}
+```
+
+Below we will run 2-fold cross validation repeated 25 times to see which method best predicts survival on the training data. We use 2-fold cross validation because the testing set is roughly half of the training set. The classifying methods inclue logistic regression, linear discriminant analysis, quadratic discriminant analysis (on two different subsets of the predictors), knn (using k = 1,5,10, and 25), naive bayes, and random forest.
+
+```{r}
+set.seed(100)
+
+# Run Cross Validation for different classifying methods
+cv.logistic <- crossValClassifier(df=train, folds=2, method="Logistic", rep=25, response="Survived")
+cv.lda <- crossValClassifier(df=train, folds=2, method="LDA", rep=25, response="Survived")
+cv.qda1 <- crossValClassifier(df=train[,c("Survived", "Age", "Fare", "Pclass", "Title", "Embarked", "FamSize")], folds=2, method="QDA", rep=25, response="Survived")
+cv.qda2 <- crossValClassifier(df=train[,c("Survived", "Age", "Fare", "Pclass", "Sex", "Embarked", "FamSize")], folds=2, method="QDA", rep=25, response="Survived")
+cv.k1 <- crossValClassifier(train[,c("Survived", continuous_predictors)], folds=2, method="KNN", rep=25, k=1, response="Survived")
+cv.k5 <- crossValClassifier(train[,c("Survived", continuous_predictors)], folds=2, method="KNN", rep=25, k=5, response="Survived")
+cv.k10 <- crossValClassifier(train[,c("Survived", continuous_predictors)], folds=2, method="KNN", rep=25, k=10, response="Survived")
+cv.k25 <- crossValClassifier(train[,c("Survived", continuous_predictors)], folds=2, method="KNN", rep=25, k=25, response="Survived")
+cv.naive <- crossValClassifier(df=train, folds=2, method="Naive", rep=25, response="Survived")
+cv.rf <- crossValClassifier(df=train, folds=2, method="Random Forest", rep=25, response="Survived")
+```
+
+Next, we'll plot the test errors and compare
+
+```{r fig.height=12, fig.width=8}
+# Create Box Plots
+my_par <- par(mfrow=c(2,2))
+for (val in c("Accuracy", "Error", "Sensitivity", "Specificity")){
+  boxplot(cv.logistic[,val], cv.lda[,val], cv.qda1[,val], cv.qda2[,val], cv.k1[,val], cv.k5[,val], cv.k10[,val], cv.k25[,val], cv.naive[,val], cv.rf[,val], ylab=paste(val), 
+          names=c("Logistic", "LDA", "QDA1", "QDA2", "KNN1", "KNN5", "KNN10", "KNN25", "NB", "RF"),main=paste(val, "of Classifier"), las=2)
+}
+par(my_par)
+```
+
+We can see that Logistic Regression, LDA, and Random Forest produce very similar results. Either would be acceptable to use. We'll use random forest for our submission!
+
+```{r}
+rf.fit <- randomForest(train[,-1],train$Survived)
+final.prediction <-data.frame(PassengerId=id.test, Survived=predict(rf.fit,newdata=test))
+write.csv(final.prediction, "submission.csv", row.names = FALSE)
+```
